@@ -1141,6 +1141,7 @@ key.streamStartStop=Start/Stop Stream
 key.streamPauseUnpause=Pause/Unpause Stream
 key.streamCommercial=Show Stream Commercials
 key.streamToggleMic=Push To Talk/Mute
+key.modmenu=Mod Menu
 
 key.categories.movement=Movement
 key.categories.misc=Miscellaneous

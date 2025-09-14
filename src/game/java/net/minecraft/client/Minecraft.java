@@ -1558,6 +1558,10 @@ public class Minecraft implements IThreadListener {
 				}
 			}
 
+			while (this.gameSettings.keyBindModMenu.isPressed()) {
+				this.displayGuiScreen(new net.minecraft.client.gui.GuiModMenu(this.currentScreen));
+			}
+
 			while (this.gameSettings.keyBindDrop.isPressed()) {
 				if (!this.thePlayer.isSpectator()) {
 					this.thePlayer.dropOneItem(GuiScreen.isCtrlKeyDown());
