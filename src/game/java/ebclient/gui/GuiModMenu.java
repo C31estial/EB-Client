@@ -1,7 +1,9 @@
 package ebclient.gui;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiButton;
@@ -22,6 +24,23 @@ public class GuiModMenu extends GuiScreen {
 	private ModCard draggedCard = null;
 	private int dragOffsetX = 0;
 	private int dragOffsetY = 0;
+	private int initialMouseX = 0;
+	private int initialMouseY = 0;
+	private boolean hasDragged = false;
+
+	// Persistence - static so it persists across menu opens/closes
+	private static final Map<String, CardConfig> savedConfigs = new HashMap<>();
+
+	private static class CardConfig {
+		public final int gridX, gridY;
+		public final CardSize cardSize;
+
+		public CardConfig(int gridX, int gridY, CardSize cardSize) {
+			this.gridX = gridX;
+			this.gridY = gridY;
+			this.cardSize = cardSize;
+		}
+	}
 
 	private static class ModToggle {
 		public final String name;
@@ -36,9 +55,10 @@ public class GuiModMenu extends GuiScreen {
 	}
 
 	public enum CardSize {
-		SMALL(40, 1, 1),    // 1/4 size, takes 0.5x0.5 grid cells
-		NORMAL(80, 1, 1),   // Normal size, takes 1x1 grid cells
-		LARGE(160, 2, 2);   // Rectangle size, takes 2x2 grid cells
+		SMALL(40, 1, 1),      // 1/4 size, takes 0.5x0.5 grid cells
+		NORMAL(80, 1, 1),     // Normal size, takes 1x1 grid cells
+		MEDIUM(160, 2, 1),    // Medium rectangle, takes 2x1 grid cells
+		LARGE(160, 2, 2);     // Large rectangle, takes 2x2 grid cells
 
 		public final int pixelSize;
 		public final int gridWidth;
@@ -96,6 +116,13 @@ public class GuiModMenu extends GuiScreen {
 			int buttonY = getPixelY() + 3;
 			return mouseX >= buttonX && mouseX <= buttonX + 12 && mouseY >= buttonY && mouseY <= buttonY + 12;
 		}
+
+		public boolean isSettingsButtonOver(int mouseX, int mouseY) {
+			if (cardSize == CardSize.SMALL) return false; // No settings button on small cards
+			int buttonX = getPixelX() + getWidth() - 30;
+			int buttonY = getPixelY() + 3;
+			return mouseX >= buttonX && mouseX <= buttonX + 12 && mouseY >= buttonY && mouseY <= buttonY + 12;
+		}
 	}
 
 	public GuiModMenu(GuiScreen parentScreenIn) {
@@ -118,15 +145,36 @@ public class GuiModMenu extends GuiScreen {
 	public void initGui() {
 		this.buttonList.clear();
 		if (this.modCards.isEmpty()) {
-			// Initialize cards in a grid pattern
+			// Initialize cards - use saved configs or default positions
 			for (int i = 0; i < modToggles.size(); i++) {
-				int gridX = i % 4; // 4 columns
-				int gridY = i / 4; // Rows as needed
-				modCards.add(new ModCard(gridX, gridY, CardSize.NORMAL, modToggles.get(i)));
+				ModToggle toggle = modToggles.get(i);
+				CardConfig saved = savedConfigs.get(toggle.name);
+
+				int gridX, gridY;
+				CardSize cardSize;
+
+				if (saved != null) {
+					gridX = saved.gridX;
+					gridY = saved.gridY;
+					cardSize = saved.cardSize;
+				} else {
+					// Default grid pattern
+					gridX = i % 4; // 4 columns
+					gridY = i / 4; // Rows as needed
+					cardSize = CardSize.NORMAL;
+				}
+
+				modCards.add(new ModCard(gridX, gridY, cardSize, toggle));
 			}
 		}
 
 		// Transparent X close button - we'll draw it manually
+	}
+
+	private void saveCardConfigs() {
+		for (ModCard card : modCards) {
+			savedConfigs.put(card.toggle.name, new CardConfig(card.gridX, card.gridY, card.cardSize));
+		}
 	}
 
 	@Override
@@ -142,6 +190,7 @@ public class GuiModMenu extends GuiScreen {
 
 	private void pushOtherCards(ModCard resizedCard) {
 		// Find all cards that would collide with the resized card
+		boolean anyMoved = false;
 		for (ModCard otherCard : modCards) {
 			if (otherCard == resizedCard) continue;
 
@@ -150,7 +199,12 @@ public class GuiModMenu extends GuiScreen {
 				int[] newPos = findNearestFreePosition(otherCard);
 				otherCard.gridX = newPos[0];
 				otherCard.gridY = newPos[1];
+				anyMoved = true;
 			}
+		}
+
+		if (anyMoved) {
+			saveCardConfigs(); // Save after pushing cards
 		}
 	}
 
@@ -210,13 +264,20 @@ public class GuiModMenu extends GuiScreen {
 					// Resize card and push others
 					card.cardSize = card.cardSize.next();
 					pushOtherCards(card);
+					saveCardConfigs(); // Save after resize
+					return;
+				} else if (card.isSettingsButtonOver(mouseX, mouseY)) {
+					// Settings button clicked - placeholder for now
 					return;
 				} else if (card.isMouseOver(mouseX, mouseY)) {
-					// Start dragging or toggle
+					// Prepare for potential drag or click
 					draggedCard = card;
 					dragOffsetX = mouseX - card.getPixelX();
 					dragOffsetY = mouseY - card.getPixelY();
-					card.isDragging = true;
+					initialMouseX = mouseX;
+					initialMouseY = mouseY;
+					hasDragged = false;
+					card.isDragging = false; // Don't start dragging immediately
 					return;
 				}
 			}
@@ -228,7 +289,7 @@ public class GuiModMenu extends GuiScreen {
 		super.mouseReleased(mouseX, mouseY, state);
 
 		if (draggedCard != null) {
-			if (draggedCard.isDragging) {
+			if (hasDragged && draggedCard.isDragging) {
 				// Snap to grid
 				int newGridX = Math.max(0, (mouseX - dragOffsetX - MARGIN + (GRID_SIZE + GRID_SPACING) / 2) / (GRID_SIZE + GRID_SPACING));
 				int newGridY = Math.max(0, (mouseY - dragOffsetY - MARGIN - 30 + (GRID_SIZE + GRID_SPACING) / 2) / (GRID_SIZE + GRID_SPACING));
@@ -237,14 +298,16 @@ public class GuiModMenu extends GuiScreen {
 				if (!isGridSpaceOccupied(newGridX, newGridY, draggedCard.cardSize, draggedCard)) {
 					draggedCard.gridX = newGridX;
 					draggedCard.gridY = newGridY;
+					saveCardConfigs(); // Save after drag
 				}
 
 				draggedCard.isDragging = false;
 			} else {
-				// If not dragged, toggle the mod
+				// If not dragged significantly, toggle the mod
 				draggedCard.toggle.enabled = !draggedCard.toggle.enabled;
 			}
 			draggedCard = null;
+			hasDragged = false;
 		}
 	}
 
@@ -252,8 +315,13 @@ public class GuiModMenu extends GuiScreen {
 	protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
 		super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
 
-		if (draggedCard != null && draggedCard.isDragging) {
-			// Update dragging position (visual only, actual grid position set on release)
+		if (draggedCard != null) {
+			// Check if we've moved far enough to start dragging (5 pixel threshold)
+			int dragDistance = Math.abs(mouseX - initialMouseX) + Math.abs(mouseY - initialMouseY);
+			if (dragDistance > 5 && !hasDragged) {
+				hasDragged = true;
+				draggedCard.isDragging = true;
+			}
 		}
 	}
 
@@ -360,6 +428,17 @@ public class GuiModMenu extends GuiScreen {
 		// Resize icon
 		this.drawString(this.fontRendererObj, "↕", resizeButtonX + 3, resizeButtonY + 2, 0xFFAAAAAA);
 
+		// Settings button (only for non-small cards)
+		if (card.cardSize != CardSize.SMALL) {
+			int settingsButtonX = cardX + cardWidth - 30;
+			int settingsButtonY = cardY + 3;
+			int settingsButtonColor = card.isSettingsButtonOver(mouseX, mouseY) ? 0xFF555555 : 0xFF444444;
+			Gui.drawRect(settingsButtonX, settingsButtonY, settingsButtonX + 12, settingsButtonY + 12, settingsButtonColor);
+
+			// Settings icon (gear symbol)
+			this.drawString(this.fontRendererObj, "⚙", settingsButtonX + 2, settingsButtonY + 2, 0xFFAAAAAA);
+		}
+
 		// Mod name (centered horizontally, smaller text)
 		String name = toggle.name;
 
@@ -386,7 +465,7 @@ public class GuiModMenu extends GuiScreen {
 
 		// Status text (centered, smaller font)
 		String statusText = toggle.enabled ? "ON" : "OFF";
-		if (card.cardSize == CardSize.LARGE) {
+		if (card.cardSize == CardSize.MEDIUM || card.cardSize == CardSize.LARGE) {
 			statusText = toggle.enabled ? "ENABLED" : "DISABLED";
 		}
 		int statusTextColor = toggle.enabled ? 0xFF00FF00 : 0xFFFF4444;
